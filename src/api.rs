@@ -88,7 +88,7 @@ impl BiedApi {
             .list
             .into_iter()
             .map(|e| e.into())
-            .filter(|e: &Offer| !e.regular_price.is_empty())
+            .filter(|e: &Offer| !e.regular_price_unit.is_empty())
             .collect())
     }
 
@@ -324,6 +324,16 @@ pub struct Offer {
     offer_price: String,
     offer_price_unit: String,
     discount_percent: i32,
+}
+
+impl Display for AuthenticatedUser {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "phone: `{}`; exid: `{}`; card: `{}`;",
+            self.phone_number, self.external_id, self.card_number
+        )
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug)]

@@ -15,7 +15,7 @@ use teloxide::{
         UpdateFilterExt, UpdateHandler,
     },
     prelude::*,
-    types::Update,
+    types::{ParseMode, Update},
     utils::command::BotCommands,
 };
 use tokio::sync::Mutex;
@@ -91,7 +91,9 @@ enum AdminCommand {
     Add { title: String, phone_number: String },
     #[command(description = "cancel adding an account.")]
     Cancel,
-    // TODO: List command, Remove command
+    #[command(description = "list all added accounts.")]
+    List,
+    // TODO: Remove command
 }
 
 fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync + 'static>> {
@@ -117,7 +119,8 @@ fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync + 'static>>
                 .endpoint(add_acconut),
             ),
         )
-        .branch(case![AdminCommand::Cancel].endpoint(cancel));
+        .branch(case![AdminCommand::Cancel].endpoint(cancel))
+        .branch(case![AdminCommand::List].endpoint(list));
 
     let message_handler = Update::filter_message()
         .branch(command_handler)
@@ -163,6 +166,24 @@ async fn cancel(bot: AutoSend<Bot>, msg: Message, dialogue: MyDialogue) -> Handl
     bot.send_message(msg.chat.id, "Cancelling the dialogue.")
         .await?;
     dialogue.exit().await?;
+    Ok(())
+}
+
+async fn list(bot: AutoSend<Bot>, msg: Message, store: Arc<Mutex<BiedStore>>) -> HandlerResult {
+    bot.send_message(
+        msg.chat.id,
+        store
+            .lock()
+            .await
+            .fetch_accounts()
+            .into_iter()
+            .map(|(title, user)| format!("*{title}* \\- {}", user))
+            .collect::<Vec<_>>()
+            .join("\n\n"),
+    )
+    .parse_mode(ParseMode::MarkdownV2)
+    .await?;
+
     Ok(())
 }
 
