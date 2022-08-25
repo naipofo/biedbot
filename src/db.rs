@@ -1,5 +1,3 @@
-use std::io::Error;
-
 use sled::Tree;
 
 use crate::api::AuthenticatedUser;
@@ -15,8 +13,12 @@ impl BiedStore {
             accounts: db.open_tree("accounts").expect("failed to create db tree"),
         }
     }
-    
-    pub fn insert_account(&mut self, title: &str, user: AuthenticatedUser) -> Result<(), Error> {
+
+    pub fn insert_account(
+        &mut self,
+        title: &str,
+        user: AuthenticatedUser,
+    ) -> Result<(), StoreError> {
         self.accounts
             .insert(&title, bincode::serialize(&user).unwrap())?;
         Ok(())
@@ -33,5 +35,27 @@ impl BiedStore {
                 ))
             })
             .collect() // TODO: return iterator instead
+    }
+
+    pub fn remove_account(&mut self, title: &str) -> Result<AuthenticatedUser, StoreError> {
+        self.accounts
+            .remove(title)?
+            .ok_or(StoreError("No account with that name".to_string()))
+            .map(|e| bincode::deserialize::<AuthenticatedUser>(&e).map_err(|e| e.into()))?
+    }
+}
+
+#[derive(Debug)]
+pub struct StoreError(String);
+
+impl From<sled::Error> for StoreError {
+    fn from(e: sled::Error) -> Self {
+        Self(format!("{:?}", e))
+    }
+}
+
+impl From<bincode::Error> for StoreError {
+    fn from(e: bincode::Error) -> Self {
+        Self(format!("{:?}", e))
     }
 }

@@ -93,7 +93,8 @@ enum AdminCommand {
     Cancel,
     #[command(description = "list all added accounts.")]
     List,
-    // TODO: Remove command
+    #[command(description = "remove account with the specified title.")]
+    Remove { title: String },
 }
 
 fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync + 'static>> {
@@ -120,7 +121,8 @@ fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync + 'static>>
             ),
         )
         .branch(case![AdminCommand::Cancel].endpoint(cancel))
-        .branch(case![AdminCommand::List].endpoint(list));
+        .branch(case![AdminCommand::List].endpoint(list))
+        .branch(case![AdminCommand::Remove { title }].endpoint(remove));
 
     let message_handler = Update::filter_message()
         .branch(command_handler)
@@ -184,6 +186,23 @@ async fn list(bot: AutoSend<Bot>, msg: Message, store: Arc<Mutex<BiedStore>>) ->
     .parse_mode(ParseMode::MarkdownV2)
     .await?;
 
+    Ok(())
+}
+
+async fn remove(
+    bot: AutoSend<Bot>,
+    msg: Message,
+    store: Arc<Mutex<BiedStore>>,
+    title: String,
+) -> HandlerResult {
+    bot.send_message(
+        msg.chat.id,
+        match store.lock().await.remove_account(&title) {
+            Ok(u) => format!("Removed user {}", u),
+            Err(e) => format!("Error removing user: {:?}", e),
+        },
+    )
+    .await?;
     Ok(())
 }
 
