@@ -460,9 +460,9 @@ struct OfferElement {
     #[serde(rename = "ThumbURL")]
     thumb_url: String,
     #[serde(rename = "ImageURL")]
-    image_url: String, // "",
+    image_url: String,
     #[serde(rename = "FullScreenImageURL")]
-    full_screen_image_url: String, // "",
+    full_screen_image_url: String,
 }
 
 #[derive(Deserialize)]
