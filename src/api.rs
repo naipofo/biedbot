@@ -117,11 +117,13 @@ impl BiedApi {
         let mut u2 = None;
 
         for e in res.headers().get_all("set-cookie") {
-            let str = e.to_str().unwrap(); // TODO: remove unwrap
-            if str.starts_with("nr1Users") {
-                u1 = Some(str.to_string());
-            } else if str.starts_with("nr2Users") {
-                u2 = Some(str.to_string());
+            let val = e
+                .to_str()
+                .map_err(|_| ApiError("Header parsing error".to_string()))?;
+            if val.starts_with("nr1Users") {
+                u1 = Some(val.to_string());
+            } else if val.starts_with("nr2Users") {
+                u2 = Some(val.to_string());
             }
         }
 
