@@ -14,7 +14,7 @@ pub struct Secrets {
 #[derive(Deserialize, Serialize)]
 pub struct TelegramConfig {
     pub bot_token: String,
-    pub maintainer_id: u64
+    pub maintainer_ids: Vec<u64>
 }
 
 #[derive(Deserialize, Serialize)]

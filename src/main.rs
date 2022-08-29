@@ -33,7 +33,11 @@ async fn main() {
     let cashe = Arc::new(Mutex::new(BiedCache::new()));
 
     let cfg = ConfigParameters {
-        bot_admin: UserId(telegram_config.maintainer_id),
+        bot_admins: telegram_config
+            .maintainer_ids
+            .iter()
+            .map(|e| UserId(*e))
+            .collect(),
     };
 
     Dispatcher::builder(bot, schema())
@@ -55,7 +59,13 @@ type HandlerResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
 
 #[derive(Clone)]
 struct ConfigParameters {
-    bot_admin: UserId,
+    bot_admins: Vec<UserId>,
+}
+
+impl ConfigParameters {
+    fn is_admin(&self, id: &UserId) -> bool {
+        self.bot_admins.contains(&id)
+    }
 }
 
 #[derive(Clone, Default)]
@@ -108,7 +118,7 @@ fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync + 'static>>
     let admin_command_handler = teloxide::filter_command::<AdminCommand, _>()
         .filter(|msg: Message, cfg: ConfigParameters| {
             msg.from()
-                .map(|user| user.id == cfg.bot_admin)
+                .map(|user| cfg.is_admin(&user.id))
                 .unwrap_or_default()
         })
         .branch(
@@ -153,7 +163,7 @@ async fn help(bot: AutoSend<Bot>, msg: Message, cfg: ConfigParameters) -> Handle
         format!(
             "{}\n\n{}",
             Command::descriptions().to_string(),
-            if msg.from().unwrap().id == cfg.bot_admin {
+            if cfg.is_admin(&msg.from().unwrap().id) {
                 AdminCommand::descriptions().to_string()
             } else {
                 "".to_string()
