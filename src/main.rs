@@ -103,6 +103,8 @@ enum AdminCommand {
     Cancel,
     #[command(description = "list all added accounts.")]
     List,
+    #[command(description = "rename an account.", parse_with = "split")]
+    Rename { old: String, new: String },
     #[command(description = "remove account with the specified title.")]
     Remove { title: String },
 }
@@ -132,6 +134,7 @@ fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync + 'static>>
         )
         .branch(case![AdminCommand::Cancel].endpoint(cancel))
         .branch(case![AdminCommand::List].endpoint(list))
+        .branch(case![AdminCommand::Rename { old, new }].endpoint(rename))
         .branch(case![AdminCommand::Remove { title }].endpoint(remove));
 
     let message_handler = Update::filter_message()
@@ -196,6 +199,23 @@ async fn list(bot: AutoSend<Bot>, msg: Message, store: Arc<Mutex<BiedStore>>) ->
     .parse_mode(ParseMode::MarkdownV2)
     .await?;
 
+    Ok(())
+}
+
+async fn rename(
+    bot: AutoSend<Bot>,
+    msg: Message,
+    store: Arc<Mutex<BiedStore>>,
+    (old, new): (String, String),
+) -> HandlerResult {
+    bot.send_message(
+        msg.chat.id,
+        match store.lock().await.rename_account(&old, &new) {
+            Ok(_) => format!("Renamed user {} to {}", old, new),
+            Err(e) => format!("Error renaming user: {:?}", e),
+        },
+    )
+    .await?;
     Ok(())
 }
 

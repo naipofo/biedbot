@@ -43,6 +43,16 @@ impl BiedStore {
             .ok_or(StoreError("No account with that name".to_string()))
             .map(|e| bincode::deserialize::<AuthenticatedUser>(&e).map_err(|e| e.into()))?
     }
+
+    pub fn rename_account(&mut self, old: &str, new: &str) -> Result<(), StoreError> {
+        self.accounts.insert(
+            new,
+            self.accounts
+                .remove(old)?
+                .ok_or(StoreError("no account with that name".to_string()))?,
+        )?;
+        Ok(())
+    }
 }
 
 #[derive(Debug)]
