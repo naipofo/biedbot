@@ -7,7 +7,7 @@ use crate::{
 
 // TODO: move cashe to file
 pub struct BiedCache {
-    pub offers: Vec<Offer>,
+    pub offers: Vec<(String, Vec<Offer>)>,
     collect_day: u32,
 }
 
@@ -29,9 +29,9 @@ impl BiedCache {
             return Ok(());
         }
         self.offers.clear();
-        for user in store.fetch_accounts() {
-            for mut of in api.get_offers(user.1.auth).await {
-                self.offers.append(&mut of);
+        for (name, user) in store.fetch_accounts() {
+            for of in api.get_offers(user.auth).await {
+                self.offers.push((name.clone(), of));
             }
         }
         Ok(())

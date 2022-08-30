@@ -232,6 +232,7 @@ async fn remove(
             Err(e) => format!("Error removing user: {:?}", e),
         },
     )
+    .parse_mode(ParseMode::MarkdownV2)
     .await?;
     Ok(())
 }
@@ -242,13 +243,20 @@ async fn offers(bot: AutoSend<Bot>, msg: Message, cashe: Arc<Mutex<BiedCache>>) 
     bot.send_message(
         msg.chat.id,
         format!(
-            "Current offers:\n{}",
+            "Current offers:\n\n{}",
             cashe
                 .lock()
                 .await
                 .offers
                 .iter()
-                .map(|e| e.short_display())
+                .map(|e| format!(
+                    "{}:\n{}\n",
+                    e.0,
+                    e.1.iter()
+                        .map(|e| e.short_display())
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                ))
                 .collect::<Vec<_>>()
                 .join("\n")
         ),
