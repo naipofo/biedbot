@@ -37,6 +37,12 @@ impl BiedStore {
             .collect() // TODO: return iterator instead
     }
 
+    pub fn fetch_account(&self, title: &str) -> Result<AuthenticatedUser, StoreError> {
+        Ok(bincode::deserialize(&self.accounts.get(title)?.ok_or(
+            StoreError("no account with that name".to_string()),
+        )?)?)
+    }
+
     pub fn remove_account(&mut self, title: &str) -> Result<AuthenticatedUser, StoreError> {
         self.accounts
             .remove(title)?
@@ -55,6 +61,7 @@ impl BiedStore {
     }
 }
 
+// TODO: use errors based on an enum, not a string
 #[derive(Debug)]
 pub struct StoreError(String);
 

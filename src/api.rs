@@ -342,7 +342,7 @@ impl Display for AuthenticatedUser {
 pub struct AuthenticatedUser {
     pub phone_number: String,
     auth_token: String,
-    card_number: String,
+    pub card_number: String,
     external_id: String,
     pub auth: AuthData,
 }

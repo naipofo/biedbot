@@ -15,7 +15,7 @@ use teloxide::{
         UpdateFilterExt, UpdateHandler,
     },
     prelude::*,
-    types::{ParseMode, Update},
+    types::{InlineKeyboardButton, InlineKeyboardMarkup, ParseMode, Update},
     utils::command::BotCommands,
 };
 use tokio::sync::Mutex;
@@ -157,7 +157,9 @@ fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync + 'static>>
         )
         .branch(dptree::endpoint(invalid_state));
 
-    dialogue::enter::<Update, InMemStorage<State>, State, _>().branch(message_handler)
+    dialogue::enter::<Update, InMemStorage<State>, State, _>()
+        .branch(message_handler)
+        .branch(Update::filter_callback_query().endpoint(endpoint_button))
 }
 
 async fn help(bot: AutoSend<Bot>, msg: Message, cfg: ConfigParameters) -> HandlerResult {
@@ -238,16 +240,13 @@ async fn remove(
 }
 
 async fn offers(bot: AutoSend<Bot>, msg: Message, cashe: Arc<Mutex<BiedCache>>) -> HandlerResult {
-    // TODO: allow for accesing the phone number and 2d code
     // TODO: don't repeat same offers
+    let offers = &cashe.lock().await.offers;
     bot.send_message(
         msg.chat.id,
         format!(
             "Current offers:\n\n{}",
-            cashe
-                .lock()
-                .await
-                .offers
+            offers
                 .iter()
                 .map(|e| format!(
                     "{}:\n{}\n",
@@ -260,6 +259,44 @@ async fn offers(bot: AutoSend<Bot>, msg: Message, cashe: Arc<Mutex<BiedCache>>) 
                 .collect::<Vec<_>>()
                 .join("\n")
         ),
+    )
+    .reply_markup(make_accounts_keyboard(
+        // TODO: don't clone here
+        offers.into_iter().map(|e| e.0.clone()).collect(),
+    ))
+    .await?;
+    Ok(())
+}
+
+fn make_accounts_keyboard(names: Vec<String>) -> InlineKeyboardMarkup {
+    InlineKeyboardMarkup::new(
+        names
+            .chunks(2)
+            .map(|e| {
+                e.iter()
+                    .map(|n| InlineKeyboardButton::callback(n.clone(), n.clone()))
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>(),
+    )
+}
+
+async fn endpoint_button(
+    bot: AutoSend<Bot>,
+    q: CallbackQuery,
+    store: Arc<Mutex<BiedStore>>,
+) -> HandlerResult {
+    let title = q.data.unwrap().clone();
+    let card_number = store
+        .lock()
+        .await
+        .fetch_account(&title)
+        .unwrap()
+        .card_number;
+    // TODO: Send EAN_13 of the card number
+    bot.send_message(
+        q.from.id,
+        format!("clicked on {:?}\ncard number is {}", title, card_number),
     )
     .await?;
     Ok(())
