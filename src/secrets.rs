@@ -9,12 +9,14 @@ pub fn get_secrets() -> Secrets {
 pub struct Secrets {
     pub telegram_config: TelegramConfig,
     pub api_config: ApiConfig,
+    pub ean_frontend: String,
+    pub cdn_root: String,
 }
 
 #[derive(Deserialize, Serialize)]
 pub struct TelegramConfig {
     pub bot_token: String,
-    pub maintainer_ids: Vec<u64>
+    pub maintainer_ids: Vec<u64>,
 }
 
 #[derive(Deserialize, Serialize)]

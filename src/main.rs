@@ -5,6 +5,7 @@ mod secrets;
 
 use crate::{api::BiedApi, secrets::Secrets};
 
+use api::Offer;
 use cache::BiedCache;
 use db::BiedStore;
 use secrets::get_secrets;
@@ -15,7 +16,7 @@ use teloxide::{
         UpdateFilterExt, UpdateHandler,
     },
     prelude::*,
-    types::{InlineKeyboardButton, InlineKeyboardMarkup, ParseMode, Update},
+    types::{InlineKeyboardButton, InlineKeyboardMarkup, InputFile, ParseMode, Update},
     utils::command::BotCommands,
 };
 use tokio::sync::Mutex;
@@ -25,6 +26,8 @@ async fn main() {
     let Secrets {
         telegram_config,
         api_config,
+        ean_frontend,
+        cdn_root,
     } = get_secrets();
 
     let bot = Bot::new(&telegram_config.bot_token).auto_send();
@@ -38,6 +41,8 @@ async fn main() {
             .iter()
             .map(|e| UserId(*e))
             .collect(),
+        ean_frontend,
+        cdn_root,
     };
 
     Dispatcher::builder(bot, schema())
@@ -60,6 +65,8 @@ type HandlerResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
 #[derive(Clone)]
 struct ConfigParameters {
     bot_admins: Vec<UserId>,
+    ean_frontend: String,
+    cdn_root: String,
 }
 
 impl ConfigParameters {
@@ -285,6 +292,8 @@ async fn endpoint_button(
     bot: AutoSend<Bot>,
     q: CallbackQuery,
     store: Arc<Mutex<BiedStore>>,
+    cashe: Arc<Mutex<BiedCache>>,
+    cfg: ConfigParameters,
 ) -> HandlerResult {
     let title = q.data.unwrap().clone();
     let card_number = store
@@ -293,11 +302,45 @@ async fn endpoint_button(
         .fetch_account(&title)
         .unwrap()
         .card_number;
-    // TODO: Send EAN_13 of the card number
+    let mut cashe = cashe.lock().await;
+    let offers = cashe.get_offers(&title).await.unwrap();
+
+    for o in offers {
+        let Offer {
+            name,
+            details,
+            limit,
+            image,
+            regular_price,
+            regular_price_unit,
+            offer_price,
+            offer_price_unit,
+            ..
+        } = o;
+        let text = format!("<b>{name}</b>\n<code>{details}</code>\n{limit}\n{regular_price} -> {offer_price}\n{regular_price_unit} -> {offer_price_unit}");
+        match image {
+            Some(img) => {
+                let pic = reqwest::get(format!("{}{}", cfg.cdn_root, img))
+                    .await?
+                    .bytes()
+                    .await?;
+                bot.send_photo(q.from.id, InputFile::memory(pic))
+                    .caption(text)
+                    .parse_mode(ParseMode::Html)
+                    .await?;
+            }
+            None => {
+                bot.send_message(q.from.id, text)
+                    .parse_mode(ParseMode::Html)
+                    .await?;
+            }
+        }
+    }
     bot.send_message(
         q.from.id,
-        format!("clicked on {:?}\ncard number is {}", title, card_number),
+        format!("[View card\u{1F4B3}]({}{})", cfg.ean_frontend, card_number),
     )
+    .parse_mode(ParseMode::MarkdownV2)
     .await?;
     Ok(())
 }

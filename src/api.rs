@@ -66,6 +66,7 @@ impl BiedApi {
         }
     }
 
+    //TODO: Allow for image only offers
     pub async fn get_offers(&self, auth: AuthData) -> Result<Vec<Offer>, ApiError> {
         let res: BiedApiResponce<OfferResponce> = self
             .api_rq(
@@ -274,7 +275,7 @@ impl Into<Offer> for OfferElement {
             limit: self.limits,
             image: vec![self.full_screen_image_url, self.image_url, self.thumb_url]
                 .into_iter()
-                .filter(|e| e.is_empty())
+                .filter(|e| !e.is_empty())
                 .collect::<Vec<_>>()
                 .first()
                 .map(|e| e.to_string()),
@@ -316,16 +317,16 @@ impl Offer {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Offer {
     id: String,
-    name: String,
-    details: String,
-    limit: String,
-    image: Option<String>,
-    human_time: String,
-    regular_price: String,
-    regular_price_unit: String,
-    offer_price: String,
-    offer_price_unit: String,
-    discount_percent: i32,
+    pub name: String,
+    pub details: String,
+    pub limit: String,
+    pub image: Option<String>,
+    pub human_time: String,
+    pub regular_price: String,
+    pub regular_price_unit: String,
+    pub offer_price: String,
+    pub offer_price_unit: String,
+    pub discount_percent: i32,
 }
 
 impl Display for AuthenticatedUser {

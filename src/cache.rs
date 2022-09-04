@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use chrono::{Datelike, Utc};
 
 use crate::{
@@ -7,14 +9,14 @@ use crate::{
 
 // TODO: move cashe to file
 pub struct BiedCache {
-    pub offers: Vec<(String, Vec<Offer>)>,
+    pub offers: HashMap<String, Vec<Offer>>,
     collect_day: u32,
 }
 
 impl BiedCache {
     pub fn new() -> Self {
         Self {
-            offers: vec![],
+            offers: HashMap::new(),
             collect_day: u32::MAX,
         }
     }
@@ -31,9 +33,13 @@ impl BiedCache {
         self.offers.clear();
         for (name, user) in store.fetch_accounts() {
             for of in api.get_offers(user.auth).await {
-                self.offers.push((name.clone(), of));
+                self.offers.insert(name.clone(), of);
             }
         }
         Ok(())
+    }
+
+    pub async fn get_offers(&mut self, title: &str) -> Option<&Vec<Offer>> {
+        self.offers.get(title)
     }
 }
