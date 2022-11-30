@@ -23,12 +23,6 @@ pub struct TelegramConfig {
 pub struct ApiConfig {
     pub api_root: String,
     pub brand_name: String,
-    pub anonymous_csrf: String,
-    pub legal_ids: Vec<String>,
     pub module_version: String,
-    pub sms_api_version: String,
-    pub next_step_version: String,
-    pub create_account_version: String,
-    pub login_api_version: String,
     pub promo_sync_api_version: String,
 }

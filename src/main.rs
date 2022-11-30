@@ -5,16 +5,13 @@ mod secrets;
 
 use crate::{api::BiedApi, secrets::Secrets};
 
-use api::Offer;
+use api::{AuthData, Offer};
 use cache::BiedCache;
 use db::BiedStore;
 use secrets::get_secrets;
 use std::sync::Arc;
 use teloxide::{
-    dispatching::{
-        dialogue::{self, InMemStorage},
-        UpdateFilterExt, UpdateHandler,
-    },
+    dispatching::{UpdateFilterExt, UpdateHandler},
     prelude::*,
     types::{InlineKeyboardButton, InlineKeyboardMarkup, InputFile, ParseMode, Update},
     utils::command::BotCommands,
@@ -30,7 +27,7 @@ async fn main() {
         cdn_root,
     } = get_secrets();
 
-    let bot = Bot::new(&telegram_config.bot_token).auto_send();
+    let bot = Bot::new(&telegram_config.bot_token);
     let api = Arc::new(BiedApi::new(api_config));
     let store = Arc::new(Mutex::new(BiedStore::new("biedstore")));
     let cashe = Arc::new(Mutex::new(BiedCache::new()));
@@ -46,20 +43,13 @@ async fn main() {
     };
 
     Dispatcher::builder(bot, schema())
-        .dependencies(dptree::deps![
-            InMemStorage::<State>::new(),
-            api,
-            store,
-            cfg,
-            cashe
-        ])
+        .dependencies(dptree::deps![api, store, cfg, cashe])
         .enable_ctrlc_handler()
         .build()
         .dispatch()
         .await;
 }
 
-type MyDialogue = Dialogue<State, InMemStorage<State>>;
 type HandlerResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
 
 #[derive(Clone)]
@@ -75,23 +65,11 @@ impl ConfigParameters {
     }
 }
 
-#[derive(Clone, Default)]
-pub enum State {
-    #[default]
-    Start,
-    ReceiveSmsCode {
-        title: String,
-        phone_number: String,
-    },
-    ReceiveTitle {
-        title: String,
-        phone_number: String,
-        sms_code: String,
-    },
-}
-
 #[derive(BotCommands, Clone)]
-#[command(rename = "lowercase", description = "These commands are supported:")]
+#[command(
+    rename_rule = "lowercase",
+    description = "These commands are supported:"
+)]
 enum Command {
     #[command(description = "display this text.")]
     Help,
@@ -102,10 +80,20 @@ enum Command {
 }
 
 #[derive(BotCommands, Clone)]
-#[command(rename = "lowercase", description = "Admin commands:")]
+#[command(rename_rule = "lowercase", description = "Admin commands:")]
 enum AdminCommand {
-    #[command(description = "add an account.", parse_with = "split")]
-    Add { title: String, phone_number: String },
+    #[command(
+        description = "add an account. Usage: /add title ean phone user1 user2 csrf",
+        parse_with = "split"
+    )]
+    Add {
+        title: String,
+        card_number: String,
+        phone_number: String,
+        users1: String,
+        users2: String,
+        csrf_token: String,
+    },
     #[command(description = "cancel adding an account.")]
     Cancel,
     #[command(description = "list all added accounts.")]
@@ -131,15 +119,16 @@ fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync + 'static>>
                 .unwrap_or_default()
         })
         .branch(
-            case![State::Start].branch(
-                case![AdminCommand::Add {
-                    title,
-                    phone_number
-                }]
-                .endpoint(add_acconut),
-            ),
+            case![AdminCommand::Add {
+                title,
+                card_number,
+                phone_number,
+                users1,
+                users2,
+                csrf_token
+            }]
+            .endpoint(add_acconut),
         )
-        .branch(case![AdminCommand::Cancel].endpoint(cancel))
         .branch(case![AdminCommand::List].endpoint(list))
         .branch(case![AdminCommand::Rename { old, new }].endpoint(rename))
         .branch(case![AdminCommand::Remove { title }].endpoint(remove));
@@ -147,29 +136,14 @@ fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync + 'static>>
     let message_handler = Update::filter_message()
         .branch(command_handler)
         .branch(admin_command_handler)
-        .branch(
-            case![State::ReceiveSmsCode {
-                title,
-                phone_number
-            }]
-            .endpoint(receive_sms_code),
-        )
-        .branch(
-            case![State::ReceiveTitle {
-                title,
-                phone_number,
-                sms_code
-            }]
-            .endpoint(recive_title),
-        )
         .branch(dptree::endpoint(invalid_state));
 
-    dialogue::enter::<Update, InMemStorage<State>, State, _>()
-        .branch(message_handler)
+    dptree::entry()
+        .branch(Update::filter_message().branch(message_handler))
         .branch(Update::filter_callback_query().endpoint(endpoint_button))
 }
 
-async fn help(bot: AutoSend<Bot>, msg: Message, cfg: ConfigParameters) -> HandlerResult {
+async fn help(bot: Bot, msg: Message, cfg: ConfigParameters) -> HandlerResult {
     bot.send_message(
         msg.chat.id,
         format!(
@@ -186,14 +160,7 @@ async fn help(bot: AutoSend<Bot>, msg: Message, cfg: ConfigParameters) -> Handle
     Ok(())
 }
 
-async fn cancel(bot: AutoSend<Bot>, msg: Message, dialogue: MyDialogue) -> HandlerResult {
-    bot.send_message(msg.chat.id, "Cancelling the dialogue.")
-        .await?;
-    dialogue.exit().await?;
-    Ok(())
-}
-
-async fn list(bot: AutoSend<Bot>, msg: Message, store: Arc<Mutex<BiedStore>>) -> HandlerResult {
+async fn list(bot: Bot, msg: Message, store: Arc<Mutex<BiedStore>>) -> HandlerResult {
     bot.send_message(
         msg.chat.id,
         store
@@ -212,7 +179,7 @@ async fn list(bot: AutoSend<Bot>, msg: Message, store: Arc<Mutex<BiedStore>>) ->
 }
 
 async fn rename(
-    bot: AutoSend<Bot>,
+    bot: Bot,
     msg: Message,
     store: Arc<Mutex<BiedStore>>,
     (old, new): (String, String),
@@ -229,7 +196,7 @@ async fn rename(
 }
 
 async fn remove(
-    bot: AutoSend<Bot>,
+    bot: Bot,
     msg: Message,
     store: Arc<Mutex<BiedStore>>,
     title: String,
@@ -246,7 +213,7 @@ async fn remove(
     Ok(())
 }
 
-async fn offers(bot: AutoSend<Bot>, msg: Message, cashe: Arc<Mutex<BiedCache>>) -> HandlerResult {
+async fn offers(bot: Bot, msg: Message, cashe: Arc<Mutex<BiedCache>>) -> HandlerResult {
     // TODO: don't repeat same offers
     let offers = &cashe.lock().await.offers;
     bot.send_message(
@@ -289,12 +256,14 @@ fn make_accounts_keyboard(names: Vec<String>) -> InlineKeyboardMarkup {
 }
 
 async fn endpoint_button(
-    bot: AutoSend<Bot>,
+    bot: Bot,
     q: CallbackQuery,
     store: Arc<Mutex<BiedStore>>,
     cashe: Arc<Mutex<BiedCache>>,
     cfg: ConfigParameters,
 ) -> HandlerResult {
+    bot.answer_callback_query(q.id).await?;
+
     let title = q.data.unwrap().clone();
     let card_number = store
         .lock()
@@ -346,7 +315,7 @@ async fn endpoint_button(
 }
 
 async fn sync(
-    bot: AutoSend<Bot>,
+    bot: Bot,
     msg: Message,
     cashe: Arc<Mutex<BiedCache>>,
     api: Arc<BiedApi>,
@@ -366,7 +335,7 @@ async fn sync(
     Ok(())
 }
 
-async fn invalid_state(bot: AutoSend<Bot>, msg: Message) -> HandlerResult {
+async fn invalid_state(bot: Bot, msg: Message) -> HandlerResult {
     bot.send_message(
         msg.chat.id,
         "Unable to handle the message. Type /help to see the usage.",
@@ -376,128 +345,37 @@ async fn invalid_state(bot: AutoSend<Bot>, msg: Message) -> HandlerResult {
 }
 
 async fn add_acconut(
-    bot: AutoSend<Bot>,
+    bot: Bot,
     msg: Message,
-    api: Arc<BiedApi>,
-    dialogue: MyDialogue,
-    (title, phone_number): (String, String),
-) -> HandlerResult {
-    match api.send_sms_code(phone_number.clone()).await {
-        Ok(_) => {
-            bot.send_message(
-                msg.chat.id,
-                format!(
-                    "Creating accont {title}. Sending sms code to {phone_number}...\nWhat is it:",
-                ),
-            )
-            .await?;
-            dialogue
-                .update(State::ReceiveSmsCode {
-                    title,
-                    phone_number,
-                })
-                .await?;
-        }
-        Err(e) => {
-            bot.send_message(msg.chat.id, format!("Error sending sms message:{:?}", &e))
-                .await?;
-            dialogue.exit().await?;
-        }
-    }
-    Ok(())
-}
-
-async fn receive_sms_code(
-    bot: AutoSend<Bot>,
-    msg: Message,
-    api: Arc<BiedApi>,
     store: Arc<Mutex<BiedStore>>,
-    dialogue: MyDialogue,
-    (title, phone_number): (String, String),
+    (title, card_number, phone_number, users1, users2, csrf_token): (
+        String,
+        String,
+        String,
+        String,
+        String,
+        String,
+    ),
 ) -> HandlerResult {
-    match msg.text().map(ToOwned::to_owned) {
-        Some(sms_code) => match api.calculate_next_step(phone_number.clone()).await {
-            Ok(e) => match e {
-                api::NextStep::NewAccount => {
-                    bot.send_message(
-                        msg.chat.id,
-                        "This is a new account, what will be it's name:",
-                    )
-                    .await?;
-                    dialogue
-                        .update(State::ReceiveTitle {
-                            sms_code,
-                            title,
-                            phone_number: phone_number,
-                        })
-                        .await?;
-                }
-                api::NextStep::AccountExist => {
-                    let user = api.login(phone_number.clone(), sms_code).await.unwrap();
-                    match store.lock().await.insert_account(&title, user) {
-                        Ok(_) => {
-                            bot.send_message(
-                                msg.chat.id,
-                                format!("Added user {title} with phone number {phone_number}!"),
-                            )
-                            .await?;
-                            dialogue.exit().await?;
-                        }
-                        Err(e) => {
-                            bot.send_message(
-                                msg.chat.id,
-                                format!("Error saving account: {:?}", &e),
-                            )
-                            .await?;
-                        }
-                    }
-                }
+    let mut store = store.lock().await;
+    bot.send_message(
+        msg.chat.id,
+        match store.insert_account(
+            &title,
+            api::AuthenticatedUser {
+                phone_number,
+                card_number,
+                auth: AuthData {
+                    users1,
+                    users2,
+                    csrf_token,
+                },
             },
-            Err(e) => {
-                bot.send_message(msg.chat.id, format!("Error logging in:{:?}", &e))
-                    .await?;
-            }
+        ) {
+            Ok(_) => "Account added succesfully".to_string(),
+            Err(e) => format!("Error adding account: {:?}", e),
         },
-        None => {
-            bot.send_message(msg.chat.id, "Please, send me the sms code.")
-                .await?;
-        }
-    }
-    Ok(())
-}
-
-async fn recive_title(
-    bot: AutoSend<Bot>,
-    msg: Message,
-    dialogue: MyDialogue,
-    api: Arc<BiedApi>,
-    store: Arc<Mutex<BiedStore>>,
-    (title, phone_number, sms_code): (String, String, String),
-) -> HandlerResult {
-    match msg.text().map(ToOwned::to_owned) {
-        Some(name) => {
-            match api
-                .register(phone_number.clone(), sms_code.clone(), name.clone())
-                .await
-            {
-                Ok(_) => {
-                    bot.send_message(
-                        dialogue.chat_id(),
-                        format!("registered {name} succesfully."),
-                    )
-                    .await?;
-                    let user = api.login(phone_number, sms_code).await.unwrap();
-                    store.lock().await.insert_account(&title, user).unwrap();
-                }
-                Err(e) => panic!("{:?}", e),
-            }
-
-            dialogue.exit().await?;
-        }
-        None => {
-            bot.send_message(msg.chat.id, "Please, send me your full name.")
-                .await?;
-        }
-    }
+    )
+    .await?;
     Ok(())
 }

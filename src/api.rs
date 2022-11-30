@@ -1,8 +1,5 @@
-use std::{fmt::Display, str::FromStr};
+use std::fmt::Display;
 
-use cookie::Cookie;
-use lazy_static::lazy_static;
-use regex::Regex;
 use reqwest::{header, Client, RequestBuilder};
 use serde::{Deserialize, Serialize};
 
@@ -43,29 +40,6 @@ impl BiedApi {
             ))
     }
 
-    pub async fn calculate_next_step(&self, phone_number: String) -> Result<NextStep, ApiError> {
-        let res: BiedApiResponce<NextStepResponce> = self
-            .api_rq(
-                "CMA_Onboarding_MCW/PhoneNumberFlow/PhoneRegistrationMain/ActionCalculateNextStep",
-                &self.config.next_step_version,
-                self.get_anon_auth(),
-                &NextStepRequest { phone_number },
-            )?
-            .send()
-            .await?
-            .json()
-            .await?;
-
-        match res.data.next_step.as_str() {
-            "NewAccount" => Ok(NextStep::NewAccount),
-            "AccountExist" | "Login" => Ok(NextStep::AccountExist),
-            _ => Err(ApiError(format!(
-                "Unknown next step - {}",
-                res.data.next_step
-            ))),
-        }
-    }
-
     //TODO: Allow for image only offers
     pub async fn get_offers(&self, auth: AuthData) -> Result<Vec<Offer>, ApiError> {
         let res: BiedApiResponce<OfferResponce> = self
@@ -82,73 +56,14 @@ impl BiedApi {
             .json()
             .await?;
 
-        // TODO: don't clone needlessly
         Ok(res
             .data
             .j4y
             .list
             .into_iter()
             .map(|e| e.into())
-            .filter(|e: &Offer| !e.regular_price_unit.is_empty())
+            .filter(|e: &Offer| !e.name.is_empty())
             .collect())
-    }
-
-    pub async fn login(
-        &self,
-        phone_number: String,
-        sms_code: String,
-    ) -> Result<AuthenticatedUser, ApiError> {
-        let res = self
-            .api_rq(
-                &format!(
-                    "{}/RegistrationFlow/OnBoarding/ActionCMA_Login",
-                    self.config.brand_name
-                ),
-                &self.config.login_api_version,
-                self.get_anon_auth(),
-                &LoginRequest {
-                    pin_code: sms_code,
-                    phone_number: phone_number.clone(),
-                },
-            )?
-            .send()
-            .await?;
-
-        let mut u1 = None;
-        let mut u2 = None;
-
-        for e in res.headers().get_all("set-cookie") {
-            let val = e
-                .to_str()
-                .map_err(|_| ApiError("Header parsing error".to_string()))?;
-            if val.starts_with("nr1Users") {
-                u1 = Some(val.to_string());
-            } else if val.starts_with("nr2Users") {
-                u2 = Some(val.to_string());
-            }
-        }
-
-        let users1 = Cookie::from_str(&u1.ok_or(ApiError("".to_string()))?)?;
-        let users2 = Cookie::from_str(&u2.ok_or(ApiError("".to_string()))?)?;
-
-        let body: BiedApiResponce<LoginResponce> = res.json().await?;
-
-        let csrf_token = extract_csrf_token(
-            &percent_encoding::percent_decode_str(users2.value()).decode_utf8_lossy(),
-        )
-        .ok_or(ApiError("can't find the csrf token".to_string()))?;
-
-        Ok(AuthenticatedUser {
-            auth_token: body.data.customer_token,
-            card_number: body.data.new_customer.card_number,
-            external_id: body.data.new_customer.customer_external_id,
-            phone_number,
-            auth: AuthData {
-                users1: users1.value().to_string(),
-                users2: users2.value().to_string(),
-                csrf_token,
-            },
-        })
     }
 
     pub fn new(config: ApiConfig) -> Self {
@@ -157,89 +72,6 @@ impl BiedApi {
             client: reqwest::Client::new(),
         }
     }
-
-    pub async fn register(
-        &self,
-        phone_number: String,
-        sms_code: String,
-        first_name: String,
-    ) -> Result<(), ApiError> {
-        self.api_rq(
-            "CMA_Onboarding_MCW/NewUserFlow/NewAccountMain/ActionCreateNewUserAndAcceptTerms",
-            &self.config.create_account_version,
-            self.get_anon_auth(),
-            &RegisterRequest {
-                accepted_legal_document_id_list: BiedListWrapper {
-                    list: self.config.legal_ids.clone(),
-                },
-                customer: CustomerData::new(first_name, phone_number),
-                deafult_locale: "en-001".to_string(),
-                deafult_store_id: "100".to_string(),
-                pin_code: sms_code,
-            },
-        )?
-        .send()
-        .await?
-        .json::<BiedApiResponce<RegisterResponce>>()
-        .await?;
-
-        Ok(())
-    }
-
-    pub async fn send_sms_code(&self, phone_number: String) -> Result<(), ApiError> {
-        let res: BiedApiResponce<SmsVerificationResponce> = self
-            .api_rq(
-                "CMA_Onboarding_MCW/ActionSendSMSAndRegistration_withValidation_New",
-                &self.config.sms_api_version,
-                self.get_anon_auth(),
-                &SmsVerificationRequest {
-                    phone_number,
-                    inserted_pin_code: "".to_string(),
-                },
-            )?
-            .send()
-            .await?
-            .json()
-            .await?;
-
-        if res.data.blocked_in_minutes > 0 {
-            Err(ApiError(format!(
-                "This number is blocked for {} minutes!",
-                res.data.blocked_in_minutes
-            )))
-        } else if res.data.is_blocked {
-            Err(ApiError("This number is blocked!".to_string()))
-        } else if !res.data.is_sms_sent {
-            Err(ApiError(format!(
-                "SMS not sent! Error: {}",
-                res.data.error_message
-            )))
-        } else {
-            Ok(())
-        }
-    }
-    fn get_anon_auth(&self) -> AuthData {
-        AuthData {
-            users1: "".to_string(),
-            users2: "".to_string(),
-            csrf_token: self.config.anonymous_csrf.clone(),
-        }
-    }
-}
-
-fn extract_csrf_token(users2: &str) -> Option<String> {
-    lazy_static! {
-        static ref RE: Regex = Regex::new(r"crf=([^;]+)").unwrap();
-    }
-    Some(
-        RE.captures(users2)?
-            .get(0)?
-            .as_str()
-            .to_string()
-            .chars()
-            .skip(4)
-            .collect(),
-    )
 }
 
 #[derive(Debug)]
@@ -333,8 +165,8 @@ impl Display for AuthenticatedUser {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "phone: `{}`; exid: `{}`; card: `{}`;",
-            self.phone_number, self.external_id, self.card_number
+            "phone: `{}`; card: `{}`;",
+            self.phone_number, self.card_number
         )
     }
 }
@@ -342,23 +174,15 @@ impl Display for AuthenticatedUser {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct AuthenticatedUser {
     pub phone_number: String,
-    auth_token: String,
     pub card_number: String,
-    external_id: String,
     pub auth: AuthData,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct AuthData {
-    users1: String,
-    users2: String,
-    csrf_token: String,
-}
-
-#[derive(Debug)]
-pub enum NextStep {
-    NewAccount,
-    AccountExist,
+    pub users1: String,
+    pub users2: String,
+    pub csrf_token: String,
 }
 
 #[derive(Deserialize)]
@@ -374,64 +198,6 @@ struct OfferRequest {
 }
 
 #[derive(Serialize)]
-#[serde(rename_all = "PascalCase")]
-struct LoginRequest {
-    pin_code: String,
-    phone_number: String,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "PascalCase")]
-struct SmsVerificationRequest {
-    phone_number: String,
-    inserted_pin_code: String,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "PascalCase")]
-struct NextStepRequest {
-    phone_number: String,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "PascalCase")]
-struct RegisterRequest {
-    accepted_legal_document_id_list: BiedListWrapper<String>,
-    customer: CustomerData,
-    deafult_locale: String,
-    deafult_store_id: String,
-    pin_code: String,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "PascalCase")]
-struct CustomerData {
-    curd_number: String,
-    date_of_birth: String,
-    email: String,
-    first_name: String,
-    guid: String,
-    last_name: String,
-    phone_number: String,
-    user_id: i32,
-}
-
-impl CustomerData {
-    fn new(first_name: String, phone_number: String) -> Self {
-        Self {
-            curd_number: "".to_string(),
-            date_of_birth: "1900-01-01".to_string(),
-            email: "".to_string(),
-            first_name,
-            guid: "".to_string(),
-            last_name: "".to_string(),
-            phone_number,
-            user_id: 0,
-        }
-    }
-}
-
-#[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct BiedApiRequest<T> {
     version_info: RequestVersionInfo,
@@ -444,12 +210,6 @@ struct BiedApiRequest<T> {
 struct RequestVersionInfo {
     module_version: String,
     api_version: String,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "PascalCase")]
-struct RegisterResponce {
-    customer_id: String,
 }
 
 #[derive(Deserialize)]
@@ -476,36 +236,6 @@ struct OfferElement {
     image_url: String,
     #[serde(rename = "FullScreenImageURL")]
     full_screen_image_url: String,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "PascalCase")]
-struct SmsVerificationResponce {
-    error_message: String,
-    #[serde(rename = "IsSMSSent")]
-    is_sms_sent: bool,
-    is_blocked: bool,
-    blocked_in_minutes: i32,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "PascalCase")]
-struct NextStepResponce {
-    next_step: String,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "PascalCase")]
-struct LoginResponce {
-    new_customer: NewCustomerData,
-    customer_token: String,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "PascalCase")]
-struct NewCustomerData {
-    card_number: String,
-    customer_external_id: String,
 }
 
 #[derive(Deserialize)]
